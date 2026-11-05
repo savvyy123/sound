@@ -1,0 +1,5 @@
+.DS_Store
+# 書き出した PNG（大きいので上げない）
+export/
+# 今は使っていない旧データ
+assets/sound_1103.svg
