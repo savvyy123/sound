@@ -240,11 +240,14 @@ const PRESETS = {
 };
 
 const SVG_PATH = 'assets/sound_1104.svg';
+// 文字の図形（tools/outline_text.py で SVG から作る）。フォントを持たない PC でも同じ形で出すため
+const OUTLINES_PATH = 'assets/text_outlines.json';
 const EXPORT_DPI = 300;
 const P = { ...DEFAULTS };
 let uiWidth = 0;
 
 let svgLines;
+let textOutlines;
 let poster;
 const canvases = {}; // 画面に出ない下書き用キャンバス（網点・モチーフの型・色版）
 // パーツの表示・非表示（ロゴと、文字の各行）。文字の行は SVG を読んだあとに足す
@@ -256,6 +259,7 @@ let fieldCache = { key: '', field: null };
 
 function preload() {
   svgLines = loadStrings(SVG_PATH);
+  textOutlines = loadJSON(OUTLINES_PATH);
 }
 
 function setup() {
@@ -375,17 +379,24 @@ function parsePoster(text) {
     const m = el.transform.baseVal.consolidate()?.matrix;
     const cs = css(el);
     const size = parseFloat(cs.fontSize);
-    const font = cs.fontFamily.includes('Hira')
-      ? `600 ${size}px "Hiragino Kaku Gothic ProN", "Hiragino Sans"`
-      : cs.fontFamily.includes('Futura')
-        ? `500 ${size}px Futura`
-        : `500 ${size}px "ABC Walter Neue"`;
+    const family = cs.fontFamily.includes('Hira') ? 'hiragino' : cs.fontFamily.includes('Futura') ? 'futura' : 'abc';
+    const font = {
+      hiragino: `600 ${size}px "Hiragino Kaku Gothic ProN", "Hiragino Sans"`,
+      futura: `500 ${size}px Futura`,
+      abc: `500 ${size}px "ABC Walter Neue"`,
+    }[family];
     const spans = [...el.querySelectorAll('tspan')];
     const spacing = (node) => (css(node).letterSpacing === 'normal' ? '0px' : css(node).letterSpacing);
     // tspan ごとに SVG と同じ位置・字間で置く。MoN の行だけは 1 行で組み直す
     const parts = el.textContent.includes('Mon Takanawa')
       ? [[0, el.textContent.replace('Mon Takanawa', 'MoN Takanawa'), '0px']]
       : (spans.length ? spans : [el]).map((s) => [parseFloat(s.getAttribute('x')) || 0, s.textContent, spacing(s)]);
+    // 文字の図形を足す（[x, 文字, 字間, 図形]）。図形がない文字は PC のフォントで描く
+    for (const part of parts) {
+      const d = textOutlines.outlines?.[`${family}|${size.toFixed(2)}|${parseFloat(part[2]).toFixed(2)}|${part[1]}`];
+      part.push(d === undefined ? null : new Path2D(d));
+      if (d === undefined) console.warn(`文字の図形がありません（tools/outline_text.py を実行し直す）: ${part[1]}`);
+    }
     // Illustrator でグループにした文字（レイヤー直下ではない <g> の中）は、まとめて 1 つのパーツにする
     const parent = el.parentElement;
     out.texts.push({
@@ -900,9 +911,16 @@ function drawText(g) {
   for (const line of poster.texts) {
     if (!show[line.line]) continue;
     g.font = line.font;
-    for (const [px, str, spacing] of line.parts) {
-      g.letterSpacing = spacing;
-      g.fillText(str, line.x + px, line.y);
+    for (const [px, str, spacing, outline] of line.parts) {
+      if (outline) {
+        g.save();
+        g.translate(line.x + px, line.y);
+        g.fill(outline);
+        g.restore();
+      } else {
+        g.letterSpacing = spacing;
+        g.fillText(str, line.x + px, line.y);
+      }
     }
   }
   g.restore();
